@@ -4,7 +4,7 @@
  * 
  * Authors:
  *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <student name and student number insert here upon modification>
+ *   2. Minnie Zhang-Lach, a2972746
  *
  * Copyright 2026 Simon Ratcliffe
  */
@@ -32,6 +32,9 @@ public class CommandLineController {
     private Integer displayId;
     private File videoFile;
     private String errorMessage;
+    
+    // create an empty list which will store the video effects selected
+    private final List<FrameProcessor> frameProcessors = new ArrayList<>();
 
     public CommandLineController(String[] args) {
         this.args = args.clone();
@@ -71,6 +74,10 @@ public class CommandLineController {
     public boolean shouldLaunchApplication() {
         return errorMessage == null && videoFile != null;
     }
+    
+    public List<FrameProcessor> getFrameProcessors() {
+    	return List.copyOf(frameProcessors);
+    }
 
     private void parse() {
         List<String> videoFiles = new ArrayList<>();
@@ -106,6 +113,35 @@ public class CommandLineController {
             }
         }
     }
+    
+    // create and store the frame processor based on the selected option
+    private boolean addFrameProcessor(char effectOption) {
+    	
+    	// match each option to its video effect
+    	FrameProcessor effect = switch (effectOption) {
+	    	case 'n' -> new FrameNumberer();
+	    	case 's' -> new FrameScratcher();
+	    	case 'f' -> new FrameFlickerer();
+	    	case 'w' -> new FrameBlackAndWhiter();
+	    	case 'y' -> new FrameYellower();
+	    	case 'v' -> new FrameVignetter();
+	    	case 'd' -> new FrameDuster();
+	    	case 'j' -> new FrameJitterer();
+	    	case 'm' -> new FrameMottler();
+	    	case 'b' -> new FrameBleeder();
+	    	case 'p' -> new FramePepperer();
+	    	default -> null;
+    	};
+    	
+    	// check if the option is valid
+    	if (effect == null) {
+    		return false;
+    	}
+    	
+    	// store the selected option effect in the list
+    	frameProcessors.add(effect);
+    	return true;
+    }
 
     private void setDisplayId(int displayId) {
         if (this.displayId != null && this.displayId != displayId) {
@@ -115,6 +151,7 @@ public class CommandLineController {
         this.displayId = displayId;
     }
 
+    // extended the help text 
     private void printHelp() {
         System.out.println("Usage: VideoPlayer [options] [video-file]");
         System.out.println();
@@ -124,5 +161,24 @@ public class CommandLineController {
         System.out.println("  -x, --maximise     Open the player maximised");
         System.out.println("  -1, --monitor-1    Open the player on display 1");
         System.out.println("  -2, --monitor-2    Open the player on display 2");
+        System.out.println();
+        System.out.println("Frame processors:");
+        System.out.println("  -n, --number-frames    Render the frame number onto each frame");
+        System.out.println("  -s, --scratch-frames   Render vertical film scratches");
+        System.out.println("  -f, --flicker-frames   Randomly dim frames");
+        System.out.println("  -w, --black-and-white  Convert frames to black and white");
+        System.out.println("  -y, --yellow-frames    Apply a warmer colour temperature");
+        System.out.println("  -v, --vignette-frames  Darken the frame edges");
+        System.out.println("  -d, --dust-frames      Render dust and hair marks");
+        System.out.println("  -j, --jitter-frames    Randomly displace frames by a few pixels");
+        System.out.println("  -m, --mottle-frames    Add cloudy emulsion mottling");
+        System.out.println("  -b, --bleed-frames     Bleed light into frames");
+        System.out.println("  -p, --pepper-frames    Pepper frames with dark spots/blotches");
+        System.out.println();
+        System.out.println("Frame processors are applied in command-line order and may be repeated.");
+        System.out.println("Example: -nssnfwyvdjmbp numbers, scratches twice, numbers again, flickers,");
+        System.out.println("converts, warms, vignettes, dusts, jitters, mottles, bleeds, then peppers.");
+        
+
     }
 }
