@@ -92,6 +92,34 @@ public class CommandLineController {
                 setDisplayId(1);
             } else if ("-2".equals(arg) || "--monitor-2".equals(arg)) {
                 setDisplayId(2);
+            }else if (arg.startsWith("-") && !arg.startsWith("--") && arg.length() > 1) {
+            	
+            	// check each letter after the dashes are removed
+            	for (char effect : arg.substring(1).toCharArray()) {
+                	// check is there is a match
+                	switch (effect) {
+                		case 'h' -> helpRequested = true;
+                		case 'a' -> audioRequested = true;
+                		case 'x' -> maximiseRequested = true;
+                		case '1' -> setDisplayId(1);
+                		case '2' -> setDisplayId(2);
+                		
+                		// show error if there is no exisiting option
+                		default -> {
+                			if (!addFrameProcessor(effect)) {
+                				errorMessage = "Unknown Option: " + effect;
+                			}
+                		}
+                	}
+            	}
+            	
+            } else if (arg.startsWith("--")) {
+            	
+            	// check if the long effect matches a video effect
+            	if (!addLongFrameProcessor(arg)) {
+            		errorMessage = "Unknown option: " + arg;
+            	}
+            	
             } else if (arg.startsWith("-")) {
                 errorMessage = "Unknown option: " + arg;
             } else {
@@ -114,9 +142,37 @@ public class CommandLineController {
         }
     }
     
+    // check which long option matches the effect
+    private boolean addLongFrameProcessor(String option) {
+    	
+    	// match the long option to the letter
+    	Character effectOption = switch (option) {
+	    	case "--number-frames" -> 'n';
+	    	case "--scratch-frames" -> 's';
+	    	case "--flicker-frames" -> 'f';
+	    	case "--black-and-white" -> 'w';
+	    	case "--yellow-frames" -> 'y';
+	    	case "--vignette-frames" -> 'v';
+	    	case "--dust-frames" -> 'd';
+	    	case "--jitter-frames" -> 'j';
+	    	case "--mottle-frames" -> 'm';
+	    	case "--bleed-frames" -> 'b';
+	    	case "--pepper-frames" -> 'p';
+	    	default -> null;
+    	};
+    	
+    	// check if the long option is valid
+    	if (effectOption == null) {
+    		return false;
+    	}
+    	
+    	// add the effect to the list
+    	return addFrameProcessor(effectOption);
+    }
+    
     // create and store the frame processor based on the selected option
     private boolean addFrameProcessor(char effectOption) {
-    	
+    	    	
     	// match each option to its video effect
     	FrameProcessor effect = switch (effectOption) {
 	    	case 'n' -> new FrameNumberer();
