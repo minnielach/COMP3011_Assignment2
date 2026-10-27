@@ -4,7 +4,7 @@
  * 
  * Authors:
  *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <student name and student number insert here upon modification>
+ *   2. Minnie Zhang-Lach a2972746
  *
  * Copyright 2026 Simon Ratcliffe
  */
@@ -91,6 +91,7 @@ public class VideoPlayerModel {
 
     public VideoPlayerModel(
             boolean audioEnabled,
+            List<FrameProcessor> frameProcessors, // receieve the effects to the video
             BiConsumer<Integer, Integer> videoSizeChangedHandler,
             Consumer<Image> frameReadyHandler,
             Consumer<String> statusChangedHandler,
@@ -102,9 +103,9 @@ public class VideoPlayerModel {
         this.statusChangedHandler = statusChangedHandler;
         this.playbackStateChangedHandler = playbackStateChangedHandler;
         this.audioOutputStateChangedHandler = audioOutputStateChangedHandler;
-        this.frameProcessors = new ArrayList<>();
+        this.frameProcessors = new ArrayList<>(frameProcessors);
 //        frameProcessors.add(new FrameBleeder());
-//        frameProcessors.add(new FrameScratcher());
+        // frameProcessors.add(new FrameScratcher());
 //        frameProcessors.add(new FrameDuster());
 //        frameProcessors.add(new FramePepperer());
 //        frameProcessors.add(new FrameBlackAndWhiter());
