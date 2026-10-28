@@ -46,6 +46,7 @@ public class VideoPlayerModel {
     private static final int MAX_PENDING_FRAMES = 10; // limit pending frame jobs without using too much memeory 
     
     private ExecutorService frameExecutor; // manage threads for frame processing 
+    private final List<BlockingQueue<ProcessingFrame>> frameQueue = new ArrayList<>(); // hold the queue between each video effect
     private final Queue<Future<PreparedFrame>> pendingFrames = new ArrayDeque<>(); // keep the frames tasks in their original order
 
     private final List<FrameProcessor> frameProcessors;
@@ -254,9 +255,24 @@ public class VideoPlayerModel {
 
     private void openPlaybackResources(long startTimestampUs) throws Exception {
     	
-    	// create a thread pool based on the number of CPU cores that is available
-    	int threadCount = Math.max(1, Runtime.getRuntime().availableProcessors());
-    	frameExecutor = Executors.newFixedThreadPool(threadCount);
+    	frameQueue.clear(); // clear queues from the previous playback
+    	
+    	// create a queue for each stage of processing
+    	for (int i=0; i <= frameProcessors.size(); i ++) {
+    		frameQueue.add(new ArrayBlockingQueue<>(MAX_PENDING_FRAMES));
+    	}
+    	
+    	// create enough threads for all effects to run 
+    	int threadCount = Math.max(Runtime.getRuntime().availableProcessors(), frameProcessors.size());
+    	frameExecutor = Executors.newFixedThreadPool(Math.max(1, threadCount));
+    	
+    	// seperate threads for each video effect
+    	for (int i=0; i < frameProcessors.size(); i++) {
+    		EffectProcessor effect = new EffectProcessor(frameProcessors.get(i), frameQueue.get(i), frameQueue.get(i+1));
+    		
+    		// run the effect on the seperate thread
+    		frameExecutor.submit(effect);
+    	}
     	
         converter = new JavaFXFrameConverter();
         grabber = new FFmpegFrameGrabber(videoFile);
@@ -522,6 +538,13 @@ public class VideoPlayerModel {
         	frameExecutor.shutdownNow();
         	frameExecutor = null;
         }
+        
+        // remove frames left in processing queues
+        for (BlockingQueue<ProcessingFrame> queue : frameQueue) {
+        	queue.clear();
+        }
+        
+        frameQueue.clear();
 
         if (audioPlayer != null) {
             audioPlayer.close();
