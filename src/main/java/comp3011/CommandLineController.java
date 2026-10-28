@@ -5,6 +5,8 @@
  * Authors:
  *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
  *   2. Minnie Zhang-Lach, a2972746
+ *   I utilised ChatGPT throughout the development of the assignment as a programming assistant. 
+ *   I mainly used it to explain the design, clarify Java syntax and help identify problems.
  *
  * Copyright 2026 Simon Ratcliffe
  */

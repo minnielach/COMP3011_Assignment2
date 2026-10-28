@@ -5,6 +5,8 @@
  * Authors:
  *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
  *   2. Minnie Zhang-Lach a2972746
+ *   I utilised ChatGPT throughout the development of the assignment as a programming assistant. 
+ *   I mainly used it to explain the design, clarify Java syntax and help identify problems.
  *
  * Copyright 2026 Simon Ratcliffe
  */
@@ -39,16 +41,19 @@ import java.util.concurrent.*;
  * decoupled from the JavaFX view.
  * </p>
  */
+
 public class VideoPlayerModel {
     private static final long NO_SEEK_REQUEST = -1; // Sentinel value used when no seek position is active.
     private static final long FIVE_SECONDS_US = 5_000_000L;
     private static final long AUDIO_LEAD_NS = 30_000_000L;
-    private static final int MAX_PENDING_FRAMES = 10; // limit pending frame jobs without using too much memeory 
+    private static final int MAX_PENDING_FRAMES = 10; // limit pending frame jobs without using too much memeory as each effect runs its own worker thread
     
     private ExecutorService frameExecutor; // manage threads for frame processing 
     private final List<BlockingQueue<ProcessingFrame>> frameQueue = new ArrayList<>(); // hold the queue between each video effect
-    private final Queue<Future<PreparedFrame>> pendingFrames = new ArrayDeque<>(); // keep the frames tasks in their original order
-
+    private int framesInProgress = 0; // count the frames that is in progress
+    private boolean decodingFinished = false; // check if video has reached the end
+    private volatile long frameGeneration = 0; // track and make visible position the frame belongs to  
+    
     private final List<FrameProcessor> frameProcessors;
     private final Queue<PendingAudio> pendingAudio = new ArrayDeque<>();
     private final BiConsumer<Integer, Integer> videoSizeChangedHandler;
@@ -122,14 +127,38 @@ public class VideoPlayerModel {
 //        frameProcessors.add(new FrameNumberer());
     }
     
-    // cancel unfinished frame jobs and the queue
-    private void clearPendingFrames() {
-    	for (Future<PreparedFrame> task : pendingFrames) {
-    		task.cancel(true);
+    // copy the frame to the first processing queue
+    private boolean queueVideo(Frame frame, InfoFrame info, int frameNumber, long timestampUs) {
+    	Frame copyFrame = frame.clone(); //copy the frame so the data does not get lost or overwritten
+    	
+    	ProcessingFrame processingFrame = new ProcessingFrame(copyFrame, info, frameGeneration, frameNumber, timestampUs); // store the frame along with the playback info
+    	
+    	boolean added = frameQueue.get(0).offer(processingFrame); // add frame to queue
+    	
+    	if (added) {
+    		framesInProgress++; // only count the frames if they were actually added
     	}
     	
-    	pendingFrames.clear();
+    	return added; // return whether the frames was added
     }
+    
+    // get a frame after all the video effects are applied 
+    private ProcessingFrame getFinishedFrame() {
+    	int lastQueue = frameQueue.size() - 1;
+    	ProcessingFrame finished;
+    	
+    	while ((finished = frameQueue.get(lastQueue).poll()) != null ) {
+    		if (finished.generation() == frameGeneration) {
+    			framesInProgress--; // a current frame has finished processing
+    			return finished;
+    		}
+    		
+    		// ignore frames from before 
+    	}
+    	
+    	return null; // return finished frame or null if nothing is ready
+    }
+    
 
     public void play(File file) {
         videoFile = file;
@@ -263,12 +292,12 @@ public class VideoPlayerModel {
     	}
     	
     	// create enough threads for all effects to run 
-    	int threadCount = Math.max(Runtime.getRuntime().availableProcessors(), frameProcessors.size());
-    	frameExecutor = Executors.newFixedThreadPool(Math.max(1, threadCount));
+    	int threadCount = Math.max(1, frameProcessors.size());
+    	frameExecutor = Executors.newFixedThreadPool(threadCount);
     	
     	// seperate threads for each video effect
     	for (int i=0; i < frameProcessors.size(); i++) {
-    		EffectProcessor effect = new EffectProcessor(frameProcessors.get(i), frameQueue.get(i), frameQueue.get(i+1));
+    		EffectProcessor effect = new EffectProcessor(frameProcessors.get(i), frameQueue.get(i), frameQueue.get(i+1), () -> frameGeneration);
     		
     		// run the effect on the seperate thread
     		frameExecutor.submit(effect);
@@ -306,9 +335,14 @@ public class VideoPlayerModel {
     }
 
     private void resetPlaybackClock(long logicalTimestampUs) {
+    	frameGeneration++; // start a new generation
+    	for (BlockingQueue<ProcessingFrame> queue : frameQueue) { // removes old processing queues
+    		queue.clear();
+    	}
+    	decodingFinished = false; // allow to start decoding 
+        framesInProgress = 0; // reset the number of frames being processed
         pendingAudio.clear();
         preparedFrame = null;
-        clearPendingFrames(); // cancel frames from previous jobs
         currentTimestampUs = logicalTimestampUs;
         relativeSeekBaseUs = logicalTimestampUs;
         firstTimestampUs = NO_SEEK_REQUEST;
@@ -325,23 +359,47 @@ public class VideoPlayerModel {
     }
 
     private void prepareNextFrame() {
-        if (!playbackOpen || preparedFrame != null) {
+        if (!playbackOpen) {
             return;
         }
-
+        
+        // check if the frame has finished processing 
         try {
-            preparedFrame = readNextVideoFrame();
+            if (preparedFrame == null) {
+            	ProcessingFrame finished = getFinishedFrame(); // get frame that has finished all the effects
+            	
+            	if (finished != null) {
+            		long timestampUs = finished.timestampUs(); // get the frames timestamp
+            		long relativeTimestampUs = Math.max(0, timestampUs - firstTimestampUs); // calculation to see how far into the video it is
+            		
+            		Image image = converter.convert(finished.frame()); // convert the frame into a JavaFX image
+            		
+            		// prepare the processed frame with its timing info
+            		preparedFrame = new PreparedFrame(image, finished.frameNumber(), timestampUs, logicalPlaybackBaseUs + relativeTimestampUs, playbackStartNs + relativeTimestampUs * 1_000L, System.nanoTime());
+            	}
+            }
+            
+        	// decode another frame if there is space
+        	if (!decodingFinished && framesInProgress < MAX_PENDING_FRAMES) {
+        		readNextVideoFrame();
+        	}
+        	
+        	// finish playblack when all frames and the audio is done
+        	if (decodingFinished && framesInProgress == 0 && preparedFrame == null && pendingAudio.isEmpty()) {
+        		finishPlayback();
+        	}
+        	
         } catch (Exception e) {
             handlePlaybackError(e);
         }
     }
 
-    private PreparedFrame readNextVideoFrame() throws Exception {
+    private void readNextVideoFrame() throws Exception {
         while (playbackOpen) {
             Frame frame = grabFrame();
             if (frame == null) {
-                finishPlayback();
-                return null;
+                decodingFinished = true; // no more frames left to decode
+                return;
             }
 
             long timestampUs = grabber.getTimestamp();
@@ -379,23 +437,11 @@ public class VideoPlayerModel {
 
             int frameNumber = grabber.getFrameNumber();
             InfoFrame info = new InfoFrame(frameNumber, timestampUs);
-            processFrame(frame, info);
-
-            Image image = converter.convert(frame);
-            long relativeTimestampUs = Math.max(0, timestampUs - firstTimestampUs);
-            long logicalTimestampUs = logicalPlaybackBaseUs + relativeTimestampUs;
-            long targetTimeNs = playbackStartNs + relativeTimestampUs * 1_000L;
-
-            return new PreparedFrame(
-                    image,
-                    frameNumber,
-                    timestampUs,
-                    logicalTimestampUs,
-                    targetTimeNs,
-                    System.nanoTime());
+            
+            // put the frame in the processing queue
+            queueVideo(frame, info, frameNumber, timestampUs);
+            return;
         }
-
-        return null;
     }
 
     // This is called on a heart beat by the GUI thread. We want to be co-operative here by (a) not blocking, and (b)
@@ -413,7 +459,7 @@ public class VideoPlayerModel {
         writeDueAudio(now);
 
         // Task (2)
-        if (preparedFrame != null && preparedFrame.targetTimeNs() <= now) {
+        if (!pauseRequested && preparedFrame != null && preparedFrame.targetTimeNs() <= now) {
             // We have a prepared frame ready to go and it is due (or just past due!) so get it up on screen ASAP!
             displayPreparedFrame(now);
         }
@@ -423,12 +469,14 @@ public class VideoPlayerModel {
         // to replace this whole block with simple linear control flow logic
         // such as: if (!pauseRequested && preparedFrame == null) prepareNextFrame();
         // to compare.
-        if (!pauseRequested && preparedFrame == null && !prepareNextFrameQueued) {
+        if ((!pauseRequested || (preparedFrame == null && framesInProgress > 0)) && !prepareNextFrameQueued) {
             prepareNextFrameQueued = true;
+            
             Platform.runLater(() -> {
                 prepareNextFrameQueued = false;
 
-                if (!pauseRequested) {
+                // collect  frames while playback open
+                if (playbackOpen) {
                     prepareNextFrame();
                 }
             });
@@ -526,7 +574,6 @@ public class VideoPlayerModel {
         playbackOpen = false;
         preparedFrame = null;
         pendingAudio.clear();
-        clearPendingFrames(); // cancel pendings jobs when playback stops
         firstTimestampUs = NO_SEEK_REQUEST;
         playbackStartNs = 0;
         pauseStartedNs = 0;
@@ -601,12 +648,6 @@ public class VideoPlayerModel {
         }
 
         return Math.max(0, durationUs - frameDurationUs);
-    }
-
-    private void processFrame(Frame frame, InfoFrame info) throws Exception {
-        for (FrameProcessor processor : frameProcessors) {
-            processor.process(frame, info);
-        }
     }
 
     private void initialiseFrameProcessors(InfoVideo videoInfo) throws Exception {
