@@ -45,6 +45,7 @@ public class VideoPlayerModel {
     private static final long AUDIO_LEAD_NS = 30_000_000L;
     
     private ExecutorService frameExecutor; // manage threads for frame processing 
+    private final Queue<Future<PreparedFrame>> pendingFrames = new ArrayDeque<>(); // keep the frames tasks in their original order
 
     private final List<FrameProcessor> frameProcessors;
     private final Queue<PendingAudio> pendingAudio = new ArrayDeque<>();
@@ -117,6 +118,15 @@ public class VideoPlayerModel {
 //        frameProcessors.add(new FrameFlickerer());
 //        frameProcessors.add(new FrameJitterer());
 //        frameProcessors.add(new FrameNumberer());
+    }
+    
+    // cancel unfinished frame jobs and the queue
+    private void clearPendingFrames() {
+    	for (Future<PreparedFrame> task : pendingFrames) {
+    		task.cancel(true);
+    	}
+    	
+    	pendingFrames.clear();
     }
 
     public void play(File file) {
@@ -281,6 +291,7 @@ public class VideoPlayerModel {
     private void resetPlaybackClock(long logicalTimestampUs) {
         pendingAudio.clear();
         preparedFrame = null;
+        clearPendingFrames(); // cancel frames from previous jobs
         currentTimestampUs = logicalTimestampUs;
         relativeSeekBaseUs = logicalTimestampUs;
         firstTimestampUs = NO_SEEK_REQUEST;
@@ -498,6 +509,7 @@ public class VideoPlayerModel {
         playbackOpen = false;
         preparedFrame = null;
         pendingAudio.clear();
+        clearPendingFrames(); // cancel pendings jobs when playback stops
         firstTimestampUs = NO_SEEK_REQUEST;
         playbackStartNs = 0;
         pauseStartedNs = 0;
