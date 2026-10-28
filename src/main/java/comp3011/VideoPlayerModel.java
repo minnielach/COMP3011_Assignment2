@@ -43,6 +43,7 @@ public class VideoPlayerModel {
     private static final long NO_SEEK_REQUEST = -1; // Sentinel value used when no seek position is active.
     private static final long FIVE_SECONDS_US = 5_000_000L;
     private static final long AUDIO_LEAD_NS = 30_000_000L;
+    private static final int MAX_PENDING_FRAMES = 10; // limit pending frame jobs without using too much memeory 
     
     private ExecutorService frameExecutor; // manage threads for frame processing 
     private final Queue<Future<PreparedFrame>> pendingFrames = new ArrayDeque<>(); // keep the frames tasks in their original order
