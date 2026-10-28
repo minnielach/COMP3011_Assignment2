@@ -27,6 +27,7 @@ import javafx.animation.AnimationTimer;
 import javafx.application.Platform;
 import javafx.scene.image.Image;
 
+import java.util.concurrent.*;
 /**
  * The model part of the video player model-view-controller architecture.
  *
@@ -42,6 +43,8 @@ public class VideoPlayerModel {
     private static final long NO_SEEK_REQUEST = -1; // Sentinel value used when no seek position is active.
     private static final long FIVE_SECONDS_US = 5_000_000L;
     private static final long AUDIO_LEAD_NS = 30_000_000L;
+    
+    private ExecutorService frameExecutor; // manage threads for frame processing 
 
     private final List<FrameProcessor> frameProcessors;
     private final Queue<PendingAudio> pendingAudio = new ArrayDeque<>();
@@ -239,6 +242,11 @@ public class VideoPlayerModel {
     }
 
     private void openPlaybackResources(long startTimestampUs) throws Exception {
+    	
+    	// create a thread pool based on the number of CPU cores that is available
+    	int threadCount = Math.max(1, Runtime.getRuntime().availableProcessors());
+    	frameExecutor = Executors.newFixedThreadPool(threadCount);
+    	
         converter = new JavaFXFrameConverter();
         grabber = new FFmpegFrameGrabber(videoFile);
         grabber.setImageMode(FrameGrabber.ImageMode.COLOR);
@@ -495,6 +503,12 @@ public class VideoPlayerModel {
         pauseStartedNs = 0;
         audioAvailable = false;
         frameProcessorsInitialised = false;
+        
+        // shut down the threads when playback closes
+        if (frameExecutor != null) {
+        	frameExecutor.shutdownNow();
+        	frameExecutor = null;
+        }
 
         if (audioPlayer != null) {
             audioPlayer.close();
